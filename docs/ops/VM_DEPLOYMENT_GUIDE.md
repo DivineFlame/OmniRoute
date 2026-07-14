@@ -65,6 +65,17 @@ apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 ```
 
+Configure the Linux host for Redis background persistence. This is a host-kernel setting, so it
+must be applied on the VM rather than inside a Docker Compose service:
+
+```bash
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-omniroute-redis.conf
+sudo sysctl --system
+sysctl vm.overcommit_memory
+```
+
+The final command should print `vm.overcommit_memory = 1`.
+
 ### 1.5 Install nginx
 
 ```bash
@@ -79,8 +90,13 @@ ufw default allow outgoing
 ufw allow 22/tcp    # SSH
 ufw allow 80/tcp    # HTTP (redirect)
 ufw allow 443/tcp   # HTTPS
+ufw allow 3001/tcp  # OmniRoute direct-IP access (omit when using nginx only)
 ufw enable
 ```
+
+The `3001/tcp` rule enables direct access at `http://YOUR_VPS_IP:3001`. Also allow TCP port
+`3001` in the VPS provider's network firewall. Remove that UFW rule after HTTPS through nginx is
+working if direct-IP access is no longer needed.
 
 > **Tip**: For maximum security, restrict ports 80 and 443 to Cloudflare IPs only. See the [Advanced Security](#advanced-security) section.
 
@@ -108,7 +124,7 @@ MACHINE_ID_SALT=CHANGE-TO-A-UNIQUE-SALT
 OMNIROUTE_WS_BRIDGE_SECRET=REPLACE-WITH-WS-BRIDGE-SECRET  # REQUIRED em produção: usado pelo Codex Responses WS bridge
 
 # === App ===
-PORT=20128
+PORT=3001
 NODE_ENV=production
 HOSTNAME=0.0.0.0
 DATA_DIR=/app/data
@@ -118,7 +134,7 @@ REQUIRE_API_KEY=false
 
 # === URLs (change to your domain) ===
 # Internal server-to-server base URL for scheduled jobs / self-fetches.
-BASE_URL=http://127.0.0.1:20128
+BASE_URL=http://127.0.0.1:3001
 # Browser-facing URL used for OAuth callbacks, dashboard links, and generated public URLs.
 NEXT_PUBLIC_BASE_URL=https://llms.seudominio.com
 # Optional explicit public origin override for generated public asset URLs.
@@ -141,7 +157,7 @@ docker run -d \
   --name omniroute \
   --restart unless-stopped \
   --env-file /opt/omniroute/.env \
-  -p 20128:20128 \
+  -p 3001:3001 \
   -v omniroute-data:/app/data \
   diegosouzapw/omniroute:latest
 ```
@@ -153,7 +169,7 @@ docker ps | grep omniroute
 docker logs omniroute --tail 20
 ```
 
-It should display: `[DB] SQLite database ready` and `listening on port 20128`.
+It should display: `[DB] SQLite database ready` and `listening on port 3001`.
 
 ---
 
@@ -209,7 +225,7 @@ server {
     client_max_body_size 100M;
 
     location / {
-        proxy_pass http://127.0.0.1:20128;
+        proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -306,7 +322,7 @@ docker pull diegosouzapw/omniroute:latest
 docker stop omniroute && docker rm omniroute
 docker run -d --name omniroute --restart unless-stopped \
   --env-file /opt/omniroute/.env \
-  -p 20128:20128 \
+  -p 3001:3001 \
   -v omniroute-data:/app/data \
   diegosouzapw/omniroute:latest
 ```
@@ -387,9 +403,9 @@ fail2ban-client status sshd
 ### Block direct access to the Docker port
 
 ```bash
-# Prevent direct external access to port 20128
-iptables -I DOCKER-USER -p tcp --dport 20128 -j DROP
-iptables -I DOCKER-USER -i lo -p tcp --dport 20128 -j ACCEPT
+# Prevent direct external access to port 3001
+iptables -I DOCKER-USER -p tcp --dport 3001 -j DROP
+iptables -I DOCKER-USER -i lo -p tcp --dport 3001 -j ACCEPT
 
 # Persist the rules
 apt install -y iptables-persistent
@@ -416,9 +432,9 @@ See also [TUNNELS_GUIDE.md](./TUNNELS_GUIDE.md) for the in-repo Cloudflare Tunne
 
 ## Port Summary
 
-| Port  | Service     | Access                     |
-| ----- | ----------- | -------------------------- |
-| 22    | SSH         | Public (with fail2ban)     |
-| 80    | nginx HTTP  | Redirect → HTTPS           |
-| 443   | nginx HTTPS | Via Cloudflare Proxy       |
-| 20128 | OmniRoute   | Localhost only (via nginx) |
+| Port | Service     | Access                                   |
+| ---- | ----------- | ---------------------------------------- |
+| 22   | SSH         | Public (with fail2ban)                   |
+| 80   | nginx HTTP  | Redirect → HTTPS                         |
+| 443  | nginx HTTPS | Via Cloudflare Proxy                     |
+| 3001 | OmniRoute   | Direct when allowed; otherwise via nginx |

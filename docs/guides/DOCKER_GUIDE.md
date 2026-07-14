@@ -100,6 +100,40 @@ Related environment variables:
 - `REDIS_URL` — connection string injected into the app (`redis://redis:6379` by default).
 - `REDIS_PORT` — host-side port mapping for the Redis container.
 
+### Linux memory-overcommit prerequisite
+
+Redis uses `fork()` for background saves and replication. On Linux, set
+`vm.overcommit_memory=1` on the **container host** before starting the stack. The setting is a
+host-kernel parameter and cannot be applied through the Redis service's Compose `sysctls` block.
+
+From a source checkout, the included idempotent helper applies the setting immediately and
+persists it across reboots:
+
+```bash
+sudo ./scripts/ops/configure-redis-host.sh
+./scripts/ops/configure-redis-host.sh --check
+docker compose restart redis
+```
+
+Without a source checkout, apply the equivalent commands directly:
+
+```bash
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-omniroute-redis.conf
+sudo sysctl --system
+```
+
+For Docker Desktop on Windows, the Linux VM owns this setting. Apply it from PowerShell after
+Docker Desktop starts (Docker Desktop upgrades or VM recreation can reset it):
+
+```powershell
+wsl -d docker-desktop -u root sysctl -w vm.overcommit_memory=1
+```
+
+The Redis message `Received SIGTERM scheduling shutdown` followed by `ready to exit` describes a
+clean stop requested by Docker (for example, during `docker compose down`, restart, or a
+deployment replacement). It is not an out-of-memory crash. Check the orchestrator or deployment
+events only if that shutdown was unexpected or repeatedly restarts the container.
+
 **Disabling Redis** is not recommended (rate limiter will degrade to in-memory fallback). If you must, either remove/comment the `redis:` service block in `docker-compose.yml` or scale it to zero:
 
 ```bash
