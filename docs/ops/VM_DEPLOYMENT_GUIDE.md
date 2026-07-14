@@ -65,6 +65,17 @@ apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 ```
 
+Configure the Linux host for Redis background persistence. This is a host-kernel setting, so it
+must be applied on the VM rather than inside a Docker Compose service:
+
+```bash
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-omniroute-redis.conf
+sudo sysctl --system
+sysctl vm.overcommit_memory
+```
+
+The final command should print `vm.overcommit_memory = 1`.
+
 ### 1.5 Install nginx
 
 ```bash
